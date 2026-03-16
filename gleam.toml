@@ -1,0 +1,24 @@
+name = "orbital"
+version = "1.0.0"
+
+description = "Build and flash Gleam projects to devices running AtomVM"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "giacomocavalieri", repo = "orbital" }
+links = [{ title = "AtomVM", href = "https://atomvm.org" }]
+
+[dependencies]
+atomvm_packbeam = ">= 0.8.2 and < 1.0.0"
+filepath = ">= 1.1.2 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_package_interface = ">= 3.0.1 and < 4.0.0"
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+simplifile = ">= 2.4.0 and < 3.0.0"
+temporary = ">= 1.0.0 and < 2.0.0"
+tom = ">= 2.0.1 and < 3.0.0"
+hoist = { git = "https://github.com/pevensie/hoist", ref = "main" }
+argv = ">= 1.0.2 and < 2.0.0"
+gleam_community_ansi = ">= 1.4.4 and < 2.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
