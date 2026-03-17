@@ -24,7 +24,7 @@ pub type ParsingState {
 }
 
 pub type CustomError {
-  UnknownCommand(command: String, state: ParsingState)
+  UnknownCommand(command: String)
 }
 
 pub type Platform {
@@ -32,7 +32,7 @@ pub type Platform {
 }
 
 pub type Error {
-  HoistError(hoist.ParseError(CustomError))
+  HoistError(state: ParsingState, error: hoist.ParseError(CustomError))
   InvalidFlashPlatform(platform: String)
   MissingRequiredPositionalArgument(state: ParsingState, argument: String)
   MissingRequiredFlag(state: ParsingState, flag: String)
@@ -45,7 +45,8 @@ pub type Error {
 }
 
 pub fn parse(args: List(String)) -> Result(Command, Error) {
-  case parse_args(args) {
+  let #(parsing_state, result) = parse_args(args)
+  case result {
     // If there's no argument at all we just show the "usage" page.
     Ok(hoist.Args(arguments: [], flags: _)) -> Ok(Usage)
 
@@ -76,9 +77,9 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
                 "[PLATFORM]",
               ))
             [_, unknown, ..] ->
-              UnknownCommand(unknown, ParsingFlash)
+              UnknownCommand(unknown)
               |> hoist.CustomError
-              |> HoistError
+              |> HoistError(state: parsing_state)
               |> Error
 
             ["esp32"] -> {
@@ -95,28 +96,28 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
     // Any other command is invalid. Hoist should prevent against this, but
     // rather than panicking I just use the same error.
     Ok(hoist.Args(arguments: [command, ..], flags: _)) -> {
-      UnknownCommand(command, ParsingBase)
+      UnknownCommand(command)
       |> hoist.CustomError
-      |> HoistError
+      |> HoistError(state: parsing_state)
       |> Error
     }
-    Error(error) -> Error(HoistError(error))
+    Error(error) -> Error(HoistError(parsing_state, error))
   }
 }
 
 fn parse_args(
   args: List(String),
-) -> Result(hoist.Args, hoist.ParseError(CustomError)) {
+) -> #(ParsingState, Result(hoist.Args, hoist.ParseError(CustomError))) {
   let flags = base_flags()
   hoist.parse_with_hook(args, flags, ParsingBase, fn(state, command, _, flags) {
     case command, state {
       // The base cli only accepts "help", or "flash" as commands.
       "help", ParsingBase -> Ok(#(ParsingHelp, help_flags()))
       "flash", ParsingBase -> Ok(#(ParsingFlash, flash_flags()))
-      _, ParsingBase -> Error(UnknownCommand(state:, command:))
+      _, ParsingBase -> Error(UnknownCommand(command:))
 
       // The "help" command accepts no subcommands
-      _, ParsingHelp -> Error(UnknownCommand(state:, command:))
+      _, ParsingHelp -> Error(UnknownCommand(command:))
 
       // The "flash" command takes positional arguments, but no subcommands, so
       // there's no need to special case any of them as they don't change the

@@ -54,18 +54,22 @@ pub fn main() -> Nil {
           io.println("")
           io.println(cli.help_text_for_state(cli.ParsingFlash))
         }
-        cli.HoistError(hoist.UnknownFlag(flag)) -> {
+        cli.HoistError(state:, error: hoist.UnknownFlag(flag)) -> {
           io.println(error_heading("unknown flag --" <> flag))
+          io.println("")
+          io.println(cli.help_text_for_state(state))
         }
-        cli.HoistError(hoist.ValueNotProvided(flag:)) -> {
+        cli.HoistError(state:, error: hoist.ValueNotProvided(flag:)) -> {
           io.println(error_heading("missing value for --" <> flag))
           io.println(
             "The flag --"
             <> flag
             <> " must have a value, but no value was passed to it",
           )
+          io.println("")
+          io.println(cli.help_text_for_state(state))
         }
-        cli.HoistError(hoist.ValueNotSupported(flag:, given:)) -> {
+        cli.HoistError(state:, error: hoist.ValueNotSupported(flag:, given:)) -> {
           io.println(error_heading("invalid --" <> flag <> " value"))
           io.println(
             "The flag --"
@@ -73,11 +77,13 @@ pub fn main() -> Nil {
             <> " is used as a toggle and expects no value,",
           )
           io.println("But it was given the value '" <> given <> "'")
+          io.println("")
+          io.println(cli.help_text_for_state(state))
         }
-        cli.HoistError(hoist.CustomError(value: cli.UnknownCommand(
-          command:,
+        cli.HoistError(
           state:,
-        ))) -> {
+          error: hoist.CustomError(value: cli.UnknownCommand(command:)),
+        ) -> {
           io.println(error_heading("unknown command '" <> command <> "'"))
           io.println("")
           io.println(cli.help_text_for_state(state))
