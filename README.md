@@ -5,6 +5,13 @@
 
 Build and flash Gleam projects to devices running [AtomVM](https://atomvm.org).
 
+![A video showcasing the 'orbital' workflow: 
+The command 'gleam run -m orbital flash esp32 --port /dev/tty.usbserial001'
+is ran in a terminal window.
+After a short while the message 'Done' is displayed and the command
+'screen' is ran to show that the code was flashed and is running on an esp device
+](https://github.com/user-attachments/assets/5c50358e-31a3-443e-b2da-2f12a58d356b)
+
 Add it to your project as a dev dependency:
 
 ```sh
