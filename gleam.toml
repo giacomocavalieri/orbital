@@ -19,6 +19,8 @@ hoist = ">= 1.0.0 and < 2.0.0"
 simplifile = ">= 2.4.0 and < 3.0.0"
 temporary = ">= 1.0.0 and < 2.0.0"
 tom = ">= 2.0.1 and < 3.0.0"
+glam = ">= 2.0.3 and < 3.0.0"
+term_size = ">= 1.0.1 and < 2.0.0"
 
 [dev_dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
