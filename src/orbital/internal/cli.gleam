@@ -15,12 +15,14 @@ pub type Command {
     dry_run: Bool,
     help: Bool,
   )
+  Build(output_file: Option(String), help: Bool)
 }
 
 pub type ParsingState {
   ParsingBase
   ParsingFlash
   ParsingHelp
+  ParsingBuild
 }
 
 pub type CustomError {
@@ -53,6 +55,13 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
     // "help" is pretty straightforward, the parsing done by hoist
     // is plenty enough.
     Ok(hoist.Args(arguments: ["help"], flags: _)) -> Ok(Help)
+
+    // "build" too since it only needs the help flag!
+    Ok(hoist.Args(arguments: ["build"], flags:)) ->
+      Ok(Build(
+        output_file: option.from_result(find_flag_value(flags, "output-file")),
+        help: toggled(flags, "help"),
+      ))
 
     // with "flash" we need a little additional checks: first we need to make
     // sure that the required platform positional argument was provided.
@@ -101,6 +110,7 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
       |> HoistError(state: parsing_state)
       |> Error
     }
+
     Error(error) -> Error(HoistError(parsing_state, error))
   }
 }
@@ -114,10 +124,14 @@ fn parse_args(
       // The base cli only accepts "help", or "flash" as commands.
       "help", ParsingBase -> Ok(#(ParsingHelp, help_flags()))
       "flash", ParsingBase -> Ok(#(ParsingFlash, flash_flags()))
+      "build", ParsingBase -> Ok(#(ParsingBuild, build_flags()))
       _, ParsingBase -> Error(UnknownCommand(command:))
 
       // The "help" command accepts no subcommands
       _, ParsingHelp -> Error(UnknownCommand(command:))
+
+      // The "build" command accepts no subcommands
+      _, ParsingBuild -> Error(UnknownCommand(command:))
 
       // The "flash" command takes positional arguments, but no subcommands, so
       // there's no need to special case any of them as they don't change the
@@ -140,6 +154,18 @@ fn base_flags() -> ValidatedFlagSpecs {
 fn help_flags() -> ValidatedFlagSpecs {
   let assert Ok(help_flags) = hoist.validate_flag_specs([])
   help_flags
+}
+
+fn build_flags() -> ValidatedFlagSpecs {
+  let assert Ok(build_flags) =
+    hoist.validate_flag_specs([
+      hoist.new_flag("help")
+        |> hoist.with_short_alias("h")
+        |> hoist.as_toggle,
+      hoist.new_flag("output-file")
+        |> hoist.with_short_alias("o"),
+    ])
+  build_flags
 }
 
 fn flash_flags() -> ValidatedFlagSpecs {
@@ -218,6 +244,7 @@ pub fn usage_text() -> String {
       <> "[COMMAND]",
     "",
     ansi.magenta("Commands:"),
+    "  build  build your code into an avm file",
     "  flash  build and flash your code to a device",
     "  help   show this help text",
   ]
@@ -242,10 +269,24 @@ pub fn flash_help_text() -> String {
   |> string.join(with: "\n")
 }
 
+pub fn build_help_text() -> String {
+  [
+    ansi.magenta("Usage: ")
+      <> ansi.green("gleam run -m orbital ")
+      <> "build <FLAGS>",
+    "",
+    ansi.magenta("Flags:"),
+    "  -o, --output-file  <PATH>  the path to write the 'avm' file to (default: \"name_of_your_project.avm\")",
+    "  -h, --help                 show this help text",
+  ]
+  |> string.join(with: "\n")
+}
+
 pub fn help_text_for_state(state: ParsingState) -> String {
   case state {
     ParsingBase -> usage_text()
     ParsingFlash -> flash_help_text()
     ParsingHelp -> usage_text()
+    ParsingBuild -> build_help_text()
   }
 }

@@ -18,9 +18,10 @@ packbeam_create(OutputPath, StartModule, Files) ->
     },
     try packbeam_api:create(CharOutputPath, CharFiles, Options) of
         ok -> {ok, nil};
-        {error, _Reason} -> {error, nil}
+        {error, eisdir} -> {error, {output_file_is_directory, OutputPath}};
+        {error, _} -> {error, {cannot_find_entrypoint_module, StartModule}}
     catch
-        _ -> {error, nil}
+        _ -> {error, {cannot_find_entrypoint_module, StartModule}}
     end.
 
 run_executable(Name, Directory, Arguments) ->

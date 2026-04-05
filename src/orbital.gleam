@@ -22,6 +22,10 @@ import tom.{NotFound, WrongType}
 
 const default_baud = 921_600
 
+pub fn start() {
+  todo
+}
+
 /// The orbital command line interface entry point.
 /// This is intended to be ran as a command line tool by running
 /// `gleam run -m orbital`.
@@ -99,6 +103,8 @@ pub fn main() -> Nil {
       flash_dry_run(platform, port, baud)
     Ok(cli.Flash(help: False, dry_run: False, platform:, port:, baud:)) ->
       flash(platform, port, baud)
+    Ok(cli.Build(help: True, ..)) -> io.println(cli.build_help_text())
+    Ok(cli.Build(output_file:, help: False)) -> build(output_file)
   }
 }
 
@@ -120,7 +126,22 @@ fn flash_dry_run(_platform: Platform, port: String, baud: Option(Int)) -> Nil {
 
 fn flash(platform: Platform, port: String, baud: Option(Int)) -> Nil {
   case do_flash(platform, port, baud) {
-    Ok(_) -> io.println(ansi.magenta("⚛️  done!"))
+    Ok(_) -> io.println(ansi.magenta("⚛️  flashed the device!"))
+    Error(error) -> {
+      io.println(error_to_string(error))
+      exit(1)
+    }
+  }
+}
+
+fn build(output_file: Option(String)) -> Nil {
+  case do_build(output_file) {
+    Ok(output_path) -> {
+      let output_path = string.remove_prefix(output_path, "./")
+      io.println(ansi.magenta(
+        "⚛️  built your project to the '" <> output_path <> "' file!",
+      ))
+    }
     Error(error) -> {
       io.println(error_to_string(error))
       exit(1)
@@ -137,19 +158,20 @@ fn do_flash(
   // This is so I won't forget to update the code once we support more!
   let Esp32 = platform
 
-  // In order to do anything useful we need to make sure Gleam is installed
-  // (we'll need to run it to compile the project), and that we're inside a
-  // Gleam project.
-  use gleam <- result.try(
-    executable.find("gleam")
-    |> result.replace_error(CannotFindGleamExecutable),
-  )
   // In future, if supporting multiple platform we'd only required the specific
   // tool needed for the given platform. For now esp is the only supported one
   // so it's fair to always require `esptool`
   use esptool <- result.try(
     executable.find("esptool")
     |> result.replace_error(CannotFindEsptoolExecutable),
+  )
+
+  // In order to do anything useful we need to make sure Gleam is installed
+  // (we'll need to run it to compile the project), and that we're inside a
+  // Gleam project.
+  use gleam <- result.try(
+    executable.find("gleam")
+    |> result.replace_error(CannotFindGleamExecutable),
   )
   use project <- result.try(
     project.load()
@@ -173,15 +195,15 @@ fn do_flash(
   })
 
   // If the root project was compiled successufully we're good to go: we can
-  // now pack all the produces `.beam` files into an `.avm` file ready to be
+  // now pack all the produced `.beam` files into an `.avm` file ready to be
   // flushed into the device.
   let outcome = {
     use directory <- temporary.create(temporary.directory())
     let output_path = filepath.join(directory, "build.avm")
-    use Nil <- try_step("Building the `.avm` file...", fn() {
+    use Nil <- try_step("Building the avm file...", fn() {
       bundle_beam_files(project, output_path)
     })
-    use Nil <- try_step("Flashing the `.avm` file into the device...", fn() {
+    use Nil <- try_step("Flashing the avm file into the device...", fn() {
       esp_flash_to_device(project, esptool, output_path, port, baud)
     })
     Ok(Nil)
@@ -191,6 +213,51 @@ fn do_flash(
     Ok(result) -> result
     Error(_) -> Error(CannotFlashWithEsptool(-1))
   }
+}
+
+fn do_build(output_file: Option(String)) -> Result(String, Error) {
+  // In order to do anything useful we need to make sure Gleam is installed
+  // (we'll need to run it to compile the project), and that we're inside a
+  // Gleam project.
+  use gleam <- result.try(
+    executable.find("gleam")
+    |> result.replace_error(CannotFindGleamExecutable),
+  )
+  use project <- result.try(
+    project.load()
+    |> result.map_error(CannotIdentifyProject),
+  )
+
+  // The gleam compiler doesn't recompile the root project when running a module
+  // from a dependency (`gleam run -m orbital`).
+  // This is quite nice as it allows us to run deps even if our own code is not
+  // in a compiling state.
+  // However, in our case we actually want to make sure that when "orbital" is
+  // running it is using the most recent version of the code: it would be quite
+  // confusing to run `gleam run -m orbital` and it flushes an outdated version
+  // of the code because we forgot to run `gleam build && gleam run -m orbital`.
+  // So we start by compiling the root project:
+  use Nil <- try_step("Compiling your Gleam project...", fn() {
+    compile(gleam, project)
+  })
+  use Nil <- try_step("Looking for a suitable entrypoint...", fn() {
+    validate_entrypoint(gleam, project)
+  })
+
+  // If the root project was compiled successufully we're good to go: we can
+  // now pack all the produced `.beam` files into an `.avm` file ready to be
+  // flushed into the device.
+  let output_path = case output_file {
+    option.Some(output_file) -> output_file
+    option.None ->
+      project.root_directory
+      |> filepath.join(project.name <> ".avm")
+  }
+  use Nil <- try_step("Building the avm file...", fn() {
+    bundle_beam_files(project, output_path)
+  })
+
+  Ok(output_path)
 }
 
 @external(erlang, "erlang", "halt")
@@ -203,6 +270,7 @@ type Error {
   CannotSpawnEsptool
   CannotCompileProject
   CannotListBeamFiles(reason: simplifile.FileError)
+  OutputFileIsDirectory(file: String)
 
   CannotReadPackageInterface(reason: simplifile.FileError)
   CannotParsePackageInterface(reason: json.DecodeError)
@@ -224,6 +292,7 @@ fn error_to_string(error: Error) -> String {
     CannotFindEsptoolExecutable -> "missing 'esptool'"
     CannotFlashWithEsptool(_) | EsptoolCannotOpenPort(_) ->
       "cannot flash device"
+    OutputFileIsDirectory(_) -> "invalid output file"
 
     // Unusual errors that should never happen, I'm not fretting over a perfect
     // name here.
@@ -237,7 +306,7 @@ fn error_to_string(error: Error) -> String {
     CannotSpawnEsptool -> "cannot flash to device"
     CannotListBeamFiles(_)
     | CannotReadPackageInterface(_)
-    | CannotParsePackageInterface(_) -> "cannot build `.avm` file"
+    | CannotParsePackageInterface(_) -> "cannot build the avm file"
   }
 
   let body = case error {
@@ -279,13 +348,19 @@ fn error_to_string(error: Error) -> String {
       <> "' is busy or doesn't exist.\n"
       <> "Hint: make sure the port is correct and the device connected."
 
+    OutputFileIsDirectory(file:) ->
+      "'"
+      <> file
+      <> "' is an existing directory.\n"
+      <> "Hint: pick a different name for your output file."
+
     // We're modelling these errors, but they should technically never happen
     // (so I'm not fretting over perfect error messages): one woulnd't even be
     // able to run `gleam` if any of these were to take place!
     CannotListBeamFiles(_) ->
       "An unexpected error while trying to figure out the files to include "
-      <> "in the `.avm` script."
-    CannotFindGleamExecutable -> "Make sure `gleam` is in your path."
+      <> "in the avm script."
+    CannotFindGleamExecutable -> "Make sure 'gleam' is in your path."
     CannotSpawnGleamCompiler ->
       "I couldn't check if your project has any compilation errors.\n"
       <> bug_report_call_to_action()
@@ -293,18 +368,18 @@ fn error_to_string(error: Error) -> String {
       "I ran into an unexpected error trying to run 'esptool'.\n"
       <> bug_report_call_to_action()
     CannotIdentifyProject(CannotReadGleamToml(Enoent)) ->
-      "It looks like this Gleam project doesn't have a `gleam.toml` file, make "
+      "It looks like this Gleam project doesn't have a 'gleam.toml' file, make "
       <> "sure to create one first."
     CannotIdentifyProject(CannotReadGleamToml(_)) ->
       "An unexpected error happened while trying to read this project's "
-      <> "`gleam.toml` file."
+      <> "'gleam.toml' file."
     CannotIdentifyProject(CannotParseGleamToml) ->
-      "It looks like this project's `gleam.toml` file is invalid."
+      "It looks like this project's 'gleam.toml' file is invalid."
     CannotIdentifyProject(CannotReadProjectName(NotFound(..))) ->
-      "This project's `gleam.toml` file doesn't have the required `name` "
+      "This project's 'gleam.toml' file doesn't have the required `name` "
       <> "field, make sure to add one."
     CannotIdentifyProject(CannotReadProjectName(WrongType(..))) ->
-      "This project's name in the `gleam.toml` file is not a string."
+      "This project's name in the 'gleam.toml' file is not a string."
     CannotReadPackageInterface(_) ->
       "I couldn't analyse your project's modules.\n"
       <> bug_report_call_to_action()
@@ -396,7 +471,6 @@ fn bundle_beam_files(
     |> result.map_error(CannotListBeamFiles),
   )
   packbeam_create(output_path:, start_module: project.name, beam_files:)
-  |> result.replace_error(CannotFindEntrypointModule(project.name))
 }
 
 /// Lists all the `.beam` files under the given project's build directory.
@@ -423,7 +497,7 @@ fn packbeam_create(
   output_path output_path: String,
   start_module module: String,
   beam_files files: List(String),
-) -> Result(Nil, Nil)
+) -> Result(Nil, Error)
 
 fn esp_flash_to_device(
   project: Project,
