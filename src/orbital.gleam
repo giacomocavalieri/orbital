@@ -1,5 +1,6 @@
 import argv
 import filepath
+import glam/doc.{type Document}
 import gleam/dict
 import gleam/int
 import gleam/io
@@ -10,7 +11,6 @@ import gleam/package_interface
 import gleam/result
 import gleam/string
 import gleam_community/ansi
-import hoist
 import orbital/internal/cli.{type Platform, Esp32}
 import orbital/internal/executable.{type ExecutablePath}
 import orbital/internal/project.{
@@ -18,12 +18,16 @@ import orbital/internal/project.{
 }
 import simplifile.{Enoent}
 import temporary
+import term_size
 import tom.{NotFound, WrongType}
 
 const default_baud = 921_600
 
-pub fn start() {
-  todo
+fn print_document(document: Document) -> Nil {
+  term_size.columns()
+  |> result.unwrap(80)
+  |> doc.to_string(document, _)
+  |> io.println
 }
 
 /// The orbital command line interface entry point.
@@ -33,77 +37,20 @@ pub fn start() {
 pub fn main() -> Nil {
   case cli.parse(argv.load().arguments) {
     Error(error) -> {
-      case error {
-        cli.MissingRequiredPositionalArgument(state:, argument:) -> {
-          io.println(error_heading("missing argument " <> argument))
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-        cli.MissingRequiredFlag(state:, flag:) -> {
-          io.println(error_heading("missing flag --" <> flag))
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-        cli.InvalidFlagValue(state:, flag:, value:, expected:) -> {
-          io.println(error_heading("invalid --" <> flag <> " value"))
-          io.println("The flag --" <> flag <> " expects " <> expected)
-          io.println("But it was given the value '" <> value <> "'")
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-        cli.InvalidFlashPlatform(platform:) -> {
-          io.println(error_heading("invalid platform"))
-          io.println("'" <> platform <> "' is not a supported platform.")
-          io.println("The only supported platform at the moment is 'esp32'.")
-          io.println("")
-          io.println(cli.help_text_for_state(cli.ParsingFlash))
-        }
-        cli.HoistError(state:, error: hoist.UnknownFlag(flag)) -> {
-          io.println(error_heading("unknown flag --" <> flag))
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-        cli.HoistError(state:, error: hoist.ValueNotProvided(flag:)) -> {
-          io.println(error_heading("missing value for --" <> flag))
-          io.println(
-            "The flag --"
-            <> flag
-            <> " must have a value, but no value was passed to it",
-          )
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-        cli.HoistError(state:, error: hoist.ValueNotSupported(flag:, given:)) -> {
-          io.println(error_heading("invalid --" <> flag <> " value"))
-          io.println(
-            "The flag --"
-            <> flag
-            <> " is used as a toggle and expects no value,",
-          )
-          io.println("But it was given the value '" <> given <> "'")
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-        cli.HoistError(
-          state:,
-          error: hoist.CustomError(value: cli.UnknownCommand(command:)),
-        ) -> {
-          io.println(error_heading("unknown command '" <> command <> "'"))
-          io.println("")
-          io.println(cli.help_text_for_state(state))
-        }
-      }
+      cli.error_to_document(error)
+      |> print_document
+
       exit(1)
     }
 
-    Ok(cli.Usage) -> io.println(cli.usage_text())
-    Ok(cli.Help) -> io.println(cli.usage_text())
-    Ok(cli.Flash(help: True, ..)) -> io.println(cli.flash_help_text())
+    Ok(cli.Usage) -> print_document(cli.usage_text())
+    Ok(cli.Help) -> print_document(cli.usage_text())
+    Ok(cli.Flash(help: True, ..)) -> print_document(cli.flash_help_text())
     Ok(cli.Flash(help: False, dry_run: True, platform:, port:, baud:)) ->
       flash_dry_run(platform, port, baud)
     Ok(cli.Flash(help: False, dry_run: False, platform:, port:, baud:)) ->
       flash(platform, port, baud)
-    Ok(cli.Build(help: True, ..)) -> io.println(cli.build_help_text())
+    Ok(cli.Build(help: True, ..)) -> print_document(cli.build_help_text())
     Ok(cli.Build(output_file:, help: False)) -> build(output_file)
   }
 }

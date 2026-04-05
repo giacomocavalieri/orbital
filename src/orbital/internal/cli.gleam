@@ -1,3 +1,4 @@
+import glam/doc.{type Document}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -235,58 +236,217 @@ fn toggled(flags: List(hoist.Flag), name: String) {
   list.contains(flags, hoist.ToggleFlag(name))
 }
 
-pub fn usage_text() -> String {
+pub fn usage_text() -> Document {
   [
-    ansi.magenta("⚛️  orbital - v1.0.0"),
-    "",
-    ansi.magenta("Usage: ")
+    doc.from_string(ansi.magenta("⚛️  orbital - v1.0.0")),
+    doc.lines(2),
+    doc.from_string(
+      ansi.magenta("Usage: ")
       <> ansi.green("gleam run -m orbital ")
       <> "[COMMAND]",
-    "",
-    ansi.magenta("Commands:"),
-    "  build  build your code into an avm file",
-    "  flash  build and flash your code to a device",
-    "  help   show this help text",
+    ),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Commands:")),
+    doc.line,
+    command_line("  build  ", "build your code into an avm file"),
+    doc.line,
+    command_line("  flash  ", "build and flash your code to a device"),
+    doc.line,
+    command_line("  help   ", "show this help text"),
   ]
-  |> string.join(with: "\n")
+  |> doc.concat
+  |> doc.group
 }
 
-pub fn flash_help_text() -> String {
+pub fn flash_help_text() -> Document {
   [
-    ansi.magenta("Usage: ")
+    doc.from_string(
+      ansi.magenta("Usage: ")
       <> ansi.green("gleam run -m orbital ")
       <> "flash [PLATFORM] <FLAGS>",
-    "",
-    ansi.magenta("Platforms: "),
-    "  esp32          this will require `esptool` installed",
-    "",
-    ansi.magenta("Flags:"),
-    "  -p, --port     <STRING>  the path where to find the device",
-    "  -b, --baud     <INT>     the baud used when flashing the device (default: 921_600)",
-    "  -d, --dry-run            only show the command used to flash the device",
-    "  -h, --help               show this help text",
+    ),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Platforms: ")),
+    command_line("  esp32          ", "this will require `esptool` installed"),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Flags:")),
+    doc.line,
+    command_line(
+      "  -p, --port     <STRING>  ",
+      "the path where to find the device",
+    ),
+    doc.line,
+    command_line_with_default(
+      "  -b, --baud     <INT>     ",
+      "the baud used when flashing the device",
+      "921_600",
+    ),
+    doc.line,
+    command_line(
+      "  -d, --dry-run            ",
+      "only show the command used to flash the device",
+    ),
+    doc.line,
+    command_line("  -h, --help               ", "show this help text"),
   ]
-  |> string.join(with: "\n")
+  |> doc.concat
+  |> doc.group
 }
 
-pub fn build_help_text() -> String {
+pub fn build_help_text() -> Document {
   [
-    ansi.magenta("Usage: ")
+    doc.from_string(
+      ansi.magenta("Usage: ")
       <> ansi.green("gleam run -m orbital ")
       <> "build <FLAGS>",
-    "",
-    ansi.magenta("Flags:"),
-    "  -o, --output-file  <PATH>  the path to write the 'avm' file to (default: \"name_of_your_project.avm\")",
-    "  -h, --help                 show this help text",
+    ),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Flags:")),
+    doc.line,
+    command_line_with_default(
+      "  -o, --output-file  <PATH>  ",
+      "the path to write the 'avm' file to",
+      "\"name_of_your_project.avm\"",
+    ),
+    doc.line,
+    command_line("  -h, --help                 ", "show this help text"),
   ]
-  |> string.join(with: "\n")
+  |> doc.concat
 }
 
-pub fn help_text_for_state(state: ParsingState) -> String {
+pub fn help_text_for_state(state: ParsingState) -> Document {
   case state {
     ParsingBase -> usage_text()
     ParsingFlash -> flash_help_text()
     ParsingHelp -> usage_text()
     ParsingBuild -> build_help_text()
+  }
+}
+
+fn command_line(name: String, description: String) -> Document {
+  doc.concat([
+    doc.from_string(name),
+    flex_text(description)
+      |> doc.nest(by: string.length(name)),
+  ])
+}
+
+fn command_line_with_default(
+  name: String,
+  description: String,
+  default: String,
+) -> Document {
+  [
+    doc.from_string(name),
+    [
+      flex_text(description),
+      doc.space,
+      flex_text("(default: " <> default <> ")"),
+    ]
+      |> doc.concat
+      |> doc.group
+      |> doc.nest(by: string.length(name)),
+  ]
+  |> doc.concat
+}
+
+fn flex_text(text: String) -> Document {
+  string.split(text, on: " ")
+  |> list.map(doc.from_string)
+  |> doc.join(doc.flex_space)
+  |> doc.group
+}
+
+fn error_heading(title: String) -> Document {
+  doc.from_string(ansi.bold(ansi.red("Error: ") <> title))
+}
+
+pub fn error_to_document(error: Error) -> Document {
+  case error {
+    MissingRequiredPositionalArgument(state:, argument:) ->
+      doc.concat([
+        error_heading("missing argument " <> argument),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
+
+    MissingRequiredFlag(state:, flag:) ->
+      doc.concat([
+        error_heading("missing flag --" <> flag),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
+
+    InvalidFlagValue(state:, flag:, value:, expected:) ->
+      doc.concat([
+        error_heading("invalid --" <> flag <> " value"),
+        doc.line,
+        flex_text(
+          "The flag --"
+          <> flag
+          <> " expects "
+          <> expected
+          <> " but it was given the value '"
+          <> value
+          <> "'",
+        ),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
+
+    InvalidFlashPlatform(platform:) ->
+      doc.concat([
+        error_heading("invalid platform"),
+        flex_text("'" <> platform <> "' is not a supported platform."),
+        doc.line,
+        flex_text("The only supported platform at the moment is 'esp32'."),
+        doc.lines(2),
+        help_text_for_state(ParsingFlash),
+      ])
+
+    HoistError(state:, error: hoist.UnknownFlag(flag)) ->
+      doc.concat([
+        error_heading("unknown flag --" <> flag),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
+
+    HoistError(state:, error: hoist.ValueNotProvided(flag:)) ->
+      doc.concat([
+        error_heading("missing value for --" <> flag),
+        flex_text(
+          "The flag --"
+          <> flag
+          <> " must have a value, but no value was passed to it",
+        ),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
+
+    HoistError(state:, error: hoist.ValueNotSupported(flag:, given:)) ->
+      doc.concat([
+        error_heading("invalid --" <> flag <> " value"),
+        doc.line,
+        flex_text(
+          "The flag --"
+          <> flag
+          <> " is used as a toggle and expects no value,"
+          <> " but it was given the value '"
+          <> given
+          <> "'",
+        ),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
+
+    HoistError(
+      state:,
+      error: hoist.CustomError(value: UnknownCommand(command:)),
+    ) ->
+      doc.concat([
+        error_heading("unknown command '" <> command <> "'"),
+        doc.lines(2),
+        help_text_for_state(state),
+      ])
   }
 }
