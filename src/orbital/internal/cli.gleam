@@ -235,7 +235,7 @@ pub fn flash_help_text() -> String {
     "",
     ansi.magenta("Flags:"),
     "  -p, --port     <STRING>  the path where to find the device",
-    "  -b, --baud     <INT>     the baud used when flashing the device",
+    "  -b, --baud     <INT>     the baud used when flashing the device (default: 921_600)",
     "  -d, --dry-run            only show the command used to flash the device",
     "  -h, --help               show this help text",
   ]
