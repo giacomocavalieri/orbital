@@ -1,6 +1,6 @@
 -module(orbital_ffi).
 
--export([packbeam_create/3, run_executable/3, find_executable/1]).
+-export([packbeam_create/3, packbeam_list/1, run_executable/3, find_executable/1]).
 
 packbeam_create(OutputPath, StartModule, Files) ->
     % The packbeam_api call expects its arguments to be Erlang charlists,
@@ -24,10 +24,26 @@ packbeam_create(OutputPath, StartModule, Files) ->
         _ -> {error, {cannot_find_entrypoint_module, StartModule}}
     end.
 
+-spec packbeam_list(binary()) -> {ok,[binary()]} | {error, nil}.
+packbeam_list(InputPath) ->
+    ListInputPath = unsafe_characters_to_list(InputPath),
+    try packbeam_api:list(ListInputPath) of
+        Elements when is_list(Elements) ->
+            Names = lists:map(fun(Element) ->
+                Name = packbeam_api:get_element_name(Element),
+                unsafe_characters_to_binary(Name)
+            end, Elements),
+            {ok, Names};
+        _ -> {error, nil}
+    catch
+        _ -> {error, nil}
+    end.
+
+-spec run_executable(Name :: binary(), Directory :: binary(), Arguments :: list(binary())) -> {ok, integer()} | {error, nil}.
 run_executable(Name, Directory, Arguments) ->
     try
-        Port = erlang:open_port(
-            {spawn_executable, unicode:characters_to_list(Name)},
+        StringName = unsafe_characters_to_list(Name),
+        Port = erlang:open_port({spawn_executable, StringName},
             [
                 {args, Arguments},
                 {cd, Directory},
@@ -43,8 +59,23 @@ run_executable(Name, Directory, Arguments) ->
         error:_ -> {error, nil}
     end.
 
+-spec find_executable(Name :: binary()) -> {ok, binary()} | {error, nil}.
 find_executable(Name) ->
-    case os:find_executable(unicode:characters_to_list(Name)) of
+    case os:find_executable(unsafe_characters_to_list(Name)) of
         false -> {error, nil};
-        Path -> {ok, unicode:characters_to_binary(Path)}
+        Path -> {ok, unsafe_characters_to_binary(Path)}
+    end.
+
+-spec unsafe_characters_to_list(Name :: binary()) -> string().
+unsafe_characters_to_list(Name) ->
+    case unicode:characters_to_list(Name) of
+        Result when is_list(Result) -> Result;
+        Error -> throw({unsafe_characters_to_list, Error})
+    end.
+
+-spec unsafe_characters_to_binary(Name :: string()) -> binary().
+unsafe_characters_to_binary(Name) ->
+    case unicode:characters_to_binary(Name) of
+        Result when is_binary(Result) -> Result;
+        Error -> throw({unsafe_characters_to_binary, Error})
     end.

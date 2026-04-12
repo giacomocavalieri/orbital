@@ -1,6 +1,9 @@
+# Changelog
+
 ## Unreleased
 
 - Orbital now has a `--version` flag to print its version.
+- Orbital now has a `list` command to list the contents of an avm file.
 
 ## v1.1.0 - 2026-04-05
 

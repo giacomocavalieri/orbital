@@ -6,7 +6,7 @@ import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
-import gleam/option.{type Option}
+import gleam/option.{type Option, None, Some}
 import gleam/package_interface
 import gleam/result
 import gleam/string
@@ -53,6 +53,8 @@ pub fn main() -> Nil {
       flash(platform, port, baud)
     Ok(cli.Build(help: True, ..)) -> print_document(cli.build_help_text(True))
     Ok(cli.Build(output_file:, help: False)) -> build(output_file)
+    Ok(cli.List(help: True, ..)) -> print_document(cli.list_help_text(True))
+    Ok(cli.List(input_file:, help: False)) -> list(input_file)
   }
 }
 
@@ -90,6 +92,16 @@ fn build(output_file: Option(String)) -> Nil {
         "⚛️  built your project to the '" <> output_path <> "' file!",
       ))
     }
+    Error(error) -> {
+      io.println(error_to_string(error))
+      exit(1)
+    }
+  }
+}
+
+fn list(input_file: Option(String)) -> Nil {
+  case do_list(input_file) {
+    Ok(_) -> Nil
     Error(error) -> {
       io.println(error_to_string(error))
       exit(1)
@@ -195,17 +207,41 @@ fn do_build(output_file: Option(String)) -> Result(String, Error) {
   // If the root project was compiled successufully we're good to go: we can
   // now pack all the produced `.beam` files into an `.avm` file ready to be
   // flushed into the device.
-  let output_path = case output_file {
-    option.Some(output_file) -> output_file
-    option.None ->
-      project.root_directory
-      |> filepath.join(project.name <> ".avm")
-  }
+  let output_path = option.unwrap(output_file, default_avm_file_name(project))
   use Nil <- try_step("Building the 'avm' file...", fn() {
     bundle_beam_files(project, output_path)
   })
 
   Ok(output_path)
+}
+
+/// Given a project, this returns the default name used by the tool to put the
+/// 'avm' built file.
+fn default_avm_file_name(project: Project) -> String {
+  project.root_directory
+  |> filepath.join(project.name <> ".avm")
+}
+
+fn do_list(input_file: Option(String)) -> Result(Nil, Error) {
+  use input_file <- result.try(case input_file {
+    Some(input_file) -> Ok(input_file)
+    None ->
+      project.load()
+      |> result.map_error(CannotIdentifyProject)
+      |> result.map(default_avm_file_name)
+  })
+
+  use files <- try_step("Reading the 'avm' file...", fn() {
+    packbeam_list(input_file)
+    |> result.replace_error(CannotReadAvmFile(input_file))
+  })
+
+  let files =
+    list.map(files, fn(file) { "  - " <> file })
+    |> string.join(with: "\n")
+
+  io.println("Files bundled in `" <> input_file <> "`:\n" <> files)
+  Ok(Nil)
 }
 
 @external(erlang, "erlang", "halt")
@@ -219,6 +255,8 @@ type Error {
   CannotCompileProject
   CannotListBeamFiles(reason: simplifile.FileError)
   OutputFileIsDirectory(file: String)
+
+  CannotReadAvmFile(file: String)
 
   CannotReadPackageInterface(reason: simplifile.FileError)
   CannotParsePackageInterface(reason: json.DecodeError)
@@ -241,6 +279,7 @@ fn error_to_string(error: Error) -> String {
     CannotFlashWithEsptool(_) | EsptoolCannotOpenPort(_) ->
       "cannot flash device"
     OutputFileIsDirectory(_) -> "invalid output file"
+    CannotReadAvmFile(_) -> "cannot read the 'avm' file"
 
     // Unusual errors that should never happen, I'm not fretting over a perfect
     // name here.
@@ -301,6 +340,9 @@ fn error_to_string(error: Error) -> String {
       <> file
       <> "' is an existing directory.\n"
       <> "Hint: pick a different name for your output file."
+
+    CannotReadAvmFile(file:) ->
+      "Make sure that `" <> file <> "` exists and is a valid 'avm' file."
 
     // We're modelling these errors, but they should technically never happen
     // (so I'm not fretting over perfect error messages): one woulnd't even be
@@ -446,6 +488,9 @@ fn packbeam_create(
   start_module module: String,
   beam_files files: List(String),
 ) -> Result(Nil, Error)
+
+@external(erlang, "orbital_ffi", "packbeam_list")
+fn packbeam_list(input_path input_path: String) -> Result(List(String), Nil)
 
 fn esp_flash_to_device(
   project: Project,
