@@ -1,3 +1,7 @@
+# v1.2.0 - 2026-04-12
+
+- Added `list` command to list contents of an avm file.
+
 # v1.1.0 - 2026-04-05
 
 - Orbital now has a `build` command to allow you to bundle your project into an
