@@ -52,6 +52,9 @@ pub fn main() -> Nil {
       flash(platform, port, baud)
     Ok(cli.Build(help: True, ..)) -> print_document(cli.build_help_text(True))
     Ok(cli.Build(output_file:, help: False)) -> build(output_file)
+    Ok(cli.ListAvm(help: True, ..)) ->
+      print_document(cli.list_avm_help_text(True))
+    Ok(cli.ListAvm(input_file:, help: False)) -> list_avm(input_file)
   }
 }
 
@@ -88,6 +91,19 @@ fn build(output_file: Option(String)) -> Nil {
       io.println(ansi.magenta(
         "⚛️  built your project to the '" <> output_path <> "' file!",
       ))
+    }
+    Error(error) -> {
+      io.println(error_to_string(error))
+      exit(1)
+    }
+  }
+}
+
+fn list_avm(input_file: Option(String)) -> Nil {
+  case do_list_avm(input_file) {
+    Ok(modules) -> {
+      io.println("Files in avm file:")
+      list.each(modules, fn(module) { io.println(ansi.magenta("  " <> module)) })
     }
     Error(error) -> {
       io.println(error_to_string(error))
@@ -207,6 +223,25 @@ fn do_build(output_file: Option(String)) -> Result(String, Error) {
   Ok(output_path)
 }
 
+fn do_list_avm(input_file: Option(String)) -> Result(List(String), Error) {
+  use input_path <- result.try(case input_file {
+    option.Some(input_file) -> Ok(input_file)
+    option.None -> {
+      // Make sure we are inside a Gleam project
+      use project <- result.try(
+        project.load()
+        |> result.map_error(CannotIdentifyProject),
+      )
+      Ok(
+        project.root_directory
+        |> filepath.join(project.name <> ".avm"),
+      )
+    }
+  })
+  io.println("Avm file is " <> input_path)
+  packbeam_list(input_path)
+}
+
 @external(erlang, "erlang", "halt")
 fn exit(status_code: Int) -> a
 
@@ -228,6 +263,8 @@ type Error {
 
   CannotFlashWithEsptool(status_code: Int)
   EsptoolCannotOpenPort(port: String)
+
+  CannotReadAvmFile
 }
 
 fn error_to_string(error: Error) -> String {
@@ -254,6 +291,7 @@ fn error_to_string(error: Error) -> String {
     CannotListBeamFiles(_)
     | CannotReadPackageInterface(_)
     | CannotParsePackageInterface(_) -> "cannot build the 'avm' file"
+    CannotReadAvmFile -> "cannot read the 'avm' file"
   }
 
   let body = case error {
@@ -333,6 +371,7 @@ fn error_to_string(error: Error) -> String {
     CannotParsePackageInterface(_) ->
       "The project's package interface seems to be invalid.\n"
       <> bug_report_call_to_action()
+    CannotReadAvmFile -> "Make sure you entered an existing 'avm' file.\n"
   }
 
   error_heading(title) <> "\n" <> body
@@ -445,6 +484,9 @@ fn packbeam_create(
   start_module module: String,
   beam_files files: List(String),
 ) -> Result(Nil, Error)
+
+@external(erlang, "orbital_ffi", "packbeam_list")
+fn packbeam_list(input_path input_path: String) -> Result(List(String), Error)
 
 fn esp_flash_to_device(
   project: Project,

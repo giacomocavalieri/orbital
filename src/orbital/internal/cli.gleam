@@ -17,6 +17,7 @@ pub type Command {
     help: Bool,
   )
   Build(output_file: Option(String), help: Bool)
+  ListAvm(input_file: Option(String), help: Bool)
 }
 
 pub type ParsingState {
@@ -24,6 +25,7 @@ pub type ParsingState {
   ParsingFlash
   ParsingHelp
   ParsingBuild
+  ParsingListAvm
 }
 
 pub type CustomError {
@@ -61,6 +63,13 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
     Ok(hoist.Args(arguments: ["build"], flags:)) ->
       Ok(Build(
         output_file: option.from_result(find_flag_value(flags, "output-file")),
+        help: toggled(flags, "help"),
+      ))
+
+    // "list" too since it only needs the help flag!
+    Ok(hoist.Args(arguments: ["list"], flags:)) ->
+      Ok(ListAvm(
+        input_file: option.from_result(find_flag_value(flags, "input-file")),
         help: toggled(flags, "help"),
       ))
 
@@ -126,6 +135,7 @@ fn parse_args(
       "help", ParsingBase -> Ok(#(ParsingHelp, help_flags()))
       "flash", ParsingBase -> Ok(#(ParsingFlash, flash_flags()))
       "build", ParsingBase -> Ok(#(ParsingBuild, build_flags()))
+      "list", ParsingBase -> Ok(#(ParsingListAvm, list_avm_flags()))
       _, ParsingBase -> Error(UnknownCommand(command:))
 
       // The "help" command accepts no subcommands
@@ -133,6 +143,9 @@ fn parse_args(
 
       // The "build" command accepts no subcommands
       _, ParsingBuild -> Error(UnknownCommand(command:))
+
+      // The "list" command accepts no subcommands
+      _, ParsingListAvm -> Error(UnknownCommand(command:))
 
       // The "flash" command takes positional arguments, but no subcommands, so
       // there's no need to special case any of them as they don't change the
@@ -167,6 +180,18 @@ fn build_flags() -> ValidatedFlagSpecs {
         |> hoist.with_short_alias("o"),
     ])
   build_flags
+}
+
+fn list_avm_flags() -> ValidatedFlagSpecs {
+  let assert Ok(list_avm_flags) =
+    hoist.validate_flag_specs([
+      hoist.new_flag("help")
+        |> hoist.with_short_alias("h")
+        |> hoist.as_toggle,
+      hoist.new_flag("input-file")
+        |> hoist.with_short_alias("i"),
+    ])
+  list_avm_flags
 }
 
 fn flash_flags() -> ValidatedFlagSpecs {
@@ -249,6 +274,8 @@ pub fn usage_text() -> Document {
     doc.from_string(ansi.magenta("Commands:")),
     doc.line,
     command_line("  build  ", "build your code into an 'avm' file"),
+    doc.line,
+    command_line("  list   ", "list the contents of an 'avm' file"),
     doc.line,
     command_line("  flash  ", "build and flash your code to a device"),
     doc.line,
@@ -336,12 +363,48 @@ pub fn build_help_text(description: Bool) -> Document {
   |> doc.concat
 }
 
+pub fn list_avm_help_text(description: Bool) -> Document {
+  [
+    case description {
+      False -> doc.empty
+      True ->
+        [
+          flex_text("List your 'avm' file contents."),
+          doc.line,
+          flex_text(
+            "List the contents of an 'avm' file previously built with "
+            <> "with the `build` command.",
+          ),
+        ]
+        |> doc.concat
+        |> doc.append(doc.lines(2))
+    },
+    doc.from_string(
+      ansi.magenta("Usage: ")
+      <> ansi.green("gleam run -m orbital ")
+      <> "list <FLAGS>",
+    ),
+    doc.lines(2),
+    doc.from_string(ansi.magenta("Flags:")),
+    doc.line,
+    command_line_with_default(
+      "  -i, --input-file  <PATH>   ",
+      "the path to the 'avm' file",
+      "\"name_of_your_project.avm\"",
+    ),
+    doc.line,
+    command_line("  -h, --help                 ", "show this help text"),
+  ]
+  |> doc.concat
+}
+
 pub fn help_text_for_state(state: ParsingState) -> Document {
   case state {
     ParsingBase -> usage_text()
     ParsingFlash -> flash_help_text(False)
     ParsingHelp -> usage_text()
     ParsingBuild -> build_help_text(False)
+    ParsingListAvm -> list_avm_help_text(False)
   }
 }
 

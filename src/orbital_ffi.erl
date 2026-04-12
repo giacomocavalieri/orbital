@@ -1,6 +1,6 @@
 -module(orbital_ffi).
 
--export([packbeam_create/3, run_executable/3, find_executable/1]).
+-export([packbeam_create/3, packbeam_list/1, run_executable/3, find_executable/1]).
 
 packbeam_create(OutputPath, StartModule, Files) ->
     % The packbeam_api call expects its arguments to be Erlang charlists,
@@ -22,6 +22,16 @@ packbeam_create(OutputPath, StartModule, Files) ->
         {error, _} -> {error, {cannot_find_entrypoint_module, StartModule}}
     catch
         _ -> {error, {cannot_find_entrypoint_module, StartModule}}
+    end.
+
+-spec packbeam_list(binary()) -> {ok,[binary()]} | {error, cannot_read_avm_file}.
+packbeam_list(InputPath) ->
+    try packbeam_api:list(unicode:characters_to_list(InputPath)) of
+        Es when is_list(Es) ->
+            {ok, [unicode:characters_to_binary(packbeam_api:get_element_name(E)) || E <- Es]};
+        _ -> {error, cannot_read_avm_file}
+    catch
+        _ -> {error, cannot_read_avm_file}
     end.
 
 run_executable(Name, Directory, Arguments) ->
