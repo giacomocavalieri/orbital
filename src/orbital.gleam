@@ -456,31 +456,54 @@ fn bundle_beam_files(
   project: Project,
   output_path: String,
 ) -> Result(Nil, Error) {
+  let output_path = absname(output_path)
+
+  let build_directory =
+    filepath.join(project.root_directory, "build")
+    |> filepath.join("dev")
+    |> filepath.join("erlang")
+  set_cwd(build_directory)
+
   use beam_files <- result.try(
-    list_beam_files(project)
+    list_files_to_pack(project)
     |> result.map_error(CannotListBeamFiles),
   )
   packbeam_create(output_path:, start_module: project.name, beam_files:)
 }
 
-/// Lists all the `.beam` files under the given project's build directory.
+/// Lists all the `.beam` and `priv` directory files under the given
+/// project's build directory.
 ///
-fn list_beam_files(
+fn list_files_to_pack(
   project: Project,
 ) -> Result(List(String), simplifile.FileError) {
-  let build_directory =
-    filepath.join(project.root_directory, "build")
-    |> filepath.join("dev")
-    |> filepath.join("erlang")
-
-  use files <- result.try(simplifile.get_files(build_directory))
+  use files <- result.try(simplifile.get_files("."))
   let beam_files =
     list.filter(files, keeping: fn(file) {
       filepath.extension(file) == Ok("beam")
+      // || filepath.base_name(file) == project.name <> ".app"
+      || string.starts_with(file, "./" <> project.name <> "/priv")
     })
 
-  Ok(beam_files)
+  // `atomvm:read_priv(AppName, Path)` doesn't like paths starting with "./"
+  // atomvm:read_priv(myapp, <<"subdir/test.txt">>) will look for bundled file
+  // "myapp/priv/subdir/test.txt"
+  list.map(beam_files, fn(file) {
+    case file {
+      "./" <> rest -> rest
+      _ -> file
+    }
+  })
+  |> Ok()
 }
+
+type SetCwdResult
+
+@external(erlang, "file", "set_cwd")
+fn set_cwd(path: String) -> SetCwdResult
+
+@external(erlang, "filename", "absname")
+fn absname(path: String) -> String
 
 @external(erlang, "orbital_ffi", "packbeam_create")
 fn packbeam_create(
