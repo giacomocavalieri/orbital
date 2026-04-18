@@ -1,4 +1,5 @@
 import filepath
+import gleam/dict
 import gleam/result
 import simplifile
 import tom
@@ -10,7 +11,7 @@ pub type Error {
 }
 
 pub type Project {
-  Project(name: String, root_directory: String)
+  Project(name: String, root_directory: String, dependencies: List(String))
 }
 
 /// Determines the project where this function is run.
@@ -38,7 +39,12 @@ pub fn load() -> Result(Project, Error) {
     tom.get_string(gleam_toml, ["name"])
     |> result.map_error(CannotReadProjectName),
   )
-  Ok(Project(name:, root_directory:))
+  let dependencies =
+    tom.get_table(gleam_toml, ["dependencies"])
+    |> result.unwrap(dict.new())
+    |> dict.keys()
+
+  Ok(Project(name:, root_directory:, dependencies:))
 }
 
 fn find_root_directory(current_path: String) -> _ {

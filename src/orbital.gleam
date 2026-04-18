@@ -253,6 +253,7 @@ type Error {
   CannotSpawnGleamCompiler
   CannotSpawnEsptool
   CannotCompileProject
+  CannotChangeWorkingDirectory
   CannotListBeamFiles(reason: simplifile.FileError)
   OutputFileIsDirectory(file: String)
 
@@ -293,7 +294,8 @@ fn error_to_string(error: Error) -> String {
     CannotSpawnEsptool -> "cannot flash to device"
     CannotListBeamFiles(_)
     | CannotReadPackageInterface(_)
-    | CannotParsePackageInterface(_) -> "cannot build the 'avm' file"
+    | CannotParsePackageInterface(_)
+    | CannotChangeWorkingDirectory -> "cannot build the 'avm' file"
   }
 
   let body = case error {
@@ -350,6 +352,8 @@ fn error_to_string(error: Error) -> String {
     CannotListBeamFiles(_) ->
       "An unexpected error while trying to figure out the files to include "
       <> "in the 'avm' file."
+    CannotChangeWorkingDirectory ->
+      "Could not change the working directory to the Gleam build directory."
     CannotFindGleamExecutable -> "Make sure 'gleam' is in your path."
     CannotSpawnGleamCompiler ->
       "I couldn't check if your project has any compilation errors.\n"
@@ -456,37 +460,71 @@ fn bundle_beam_files(
   project: Project,
   output_path: String,
 ) -> Result(Nil, Error) {
-  use beam_files <- result.try(
-    list_beam_files(project)
-    |> result.map_error(CannotListBeamFiles),
-  )
-  packbeam_create(output_path:, start_module: project.name, beam_files:)
-}
+  let output_path = absname(output_path)
 
-/// Lists all the `.beam` files under the given project's build directory.
-///
-fn list_beam_files(
-  project: Project,
-) -> Result(List(String), simplifile.FileError) {
   let build_directory =
     filepath.join(project.root_directory, "build")
     |> filepath.join("dev")
     |> filepath.join("erlang")
 
-  use files <- result.try(simplifile.get_files(build_directory))
+  use _ <- result.try(
+    set_cwd(build_directory)
+    |> result.replace_error(CannotChangeWorkingDirectory),
+  )
+
+  use files_to_pack <- result.try(
+    list_files_to_pack(project)
+    |> result.map_error(CannotListBeamFiles),
+  )
+  packbeam_create(output_path:, start_module: project.name, files_to_pack:)
+}
+
+/// Lists all the `.beam` and `priv` directory files under the given
+/// project's build directory.
+///
+fn list_files_to_pack(
+  project: Project,
+) -> Result(List(String), simplifile.FileError) {
+  use files <- result.try(simplifile.get_files("."))
   let beam_files =
     list.filter(files, keeping: fn(file) {
       filepath.extension(file) == Ok("beam")
     })
 
-  Ok(beam_files)
+  // `atomvm:read_priv(AppName, Path)` doesn't like paths starting with "./"
+  // atomvm:read_priv(myapp, <<"subdir/test.txt">>) will look for bundled file
+  // "myapp/priv/subdir/test.txt"
+  let priv_files =
+    list.filter_map(files, fn(file) {
+      case file {
+        "./" <> rest ->
+          case string.split(rest, "/") {
+            [appname, "priv", ..] ->
+              case
+                list.contains([project.name, ..project.dependencies], appname)
+              {
+                True -> Ok(rest)
+                _ -> Error(Nil)
+              }
+            _ -> Error(Nil)
+          }
+        _ -> Error(Nil)
+      }
+    })
+  Ok(list.append(beam_files, priv_files))
 }
+
+@external(erlang, "orbital_ffi", "set_cwd")
+fn set_cwd(path: String) -> Result(Nil, Nil)
+
+@external(erlang, "filename", "absname")
+fn absname(path: String) -> String
 
 @external(erlang, "orbital_ffi", "packbeam_create")
 fn packbeam_create(
   output_path output_path: String,
   start_module module: String,
-  beam_files files: List(String),
+  files_to_pack files: List(String),
 ) -> Result(Nil, Error)
 
 @external(erlang, "orbital_ffi", "packbeam_list")

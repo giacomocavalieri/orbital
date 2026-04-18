@@ -1,6 +1,7 @@
 -module(orbital_ffi).
 
--export([packbeam_create/3, packbeam_list/1, run_executable/3, find_executable/1]).
+-export([packbeam_create/3, packbeam_list/1, run_executable/3,
+    find_executable/1, set_cwd/1]).
 
 packbeam_create(OutputPath, StartModule, Files) ->
     % The packbeam_api call expects its arguments to be Erlang charlists,
@@ -78,4 +79,13 @@ unsafe_characters_to_binary(Name) ->
     case unicode:characters_to_binary(Name) of
         Result when is_binary(Result) -> Result;
         Error -> throw({unsafe_characters_to_binary, Error})
+    end.
+
+-spec set_cwd(Path :: binary()) -> {ok, nil} | {error, nil}.
+set_cwd(Path) ->
+    try file:set_cwd(Path) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+    catch
+        _:_ -> {error, nil}
     end.
