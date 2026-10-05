@@ -33,7 +33,14 @@ run:
 
 ```sh
 gleam run -m orbital flash esp32 --port /dev/some_device
+gleam run -m orbital monitor
 ```
+
+`monitor` reads the serial console for 10 seconds. `--timeout 0` reads until
+Ctrl+C, pressed twice. The port is chosen when only one USB serial device is
+connected. ESP32 flash and monitor need [`esptool`](https://docs.espressif.com/projects/esptool/en/latest/esp32/installation.html)
+(`pip install esptool`), which also provides the `pyserial` dependency used by
+`monitor`.
 
 And you're good to go! To get an overview of all the available commands and
 options you can run:

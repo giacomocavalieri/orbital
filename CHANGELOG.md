@@ -2,8 +2,7 @@
 
 ## Unreleased
 
-- Orbital now has a `--version` flag to print its version.
-- Orbital now has a `list` command to list the contents of an avm file.
+- Orbital now has a `monitor` command to show an ESP32 board's console.
 
 ## v1.1.0 - 2026-04-05
 

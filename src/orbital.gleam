@@ -23,6 +23,10 @@ import tom.{NotFound, WrongType}
 
 const default_baud = 921_600
 
+const default_monitor_baud = 115_200
+
+const default_monitor_timeout = 10
+
 fn print_document(document: Document) -> Nil {
   term_size.columns()
   |> result.unwrap(80)
@@ -51,6 +55,11 @@ pub fn main() -> Nil {
     Ok(cli.Build(output_file:, help: False)) -> build(output_file)
     Ok(cli.List(help: True, ..)) -> print_document(cli.list_help_text(True))
     Ok(cli.List(input_file:, help: False)) -> list(input_file)
+
+    Ok(cli.Monitor(help: True, ..)) ->
+      print_document(cli.monitor_help_text(True))
+    Ok(cli.Monitor(port:, baud:, timeout:, reset:, help: False)) ->
+      monitor(port, baud, timeout, reset)
 
     // Flashing is the more involved step, and changes based on the device.
     Ok(cli.Flash(help: True, ..)) -> print_document(cli.flash_help_text(True))
@@ -102,6 +111,31 @@ fn flash_esp32_dry_run(port: String, baud: Option(Int)) -> Nil {
     |> string.join(with: "\n")
 
   io.println("To flash the device I would run this command:\n\n" <> command)
+}
+
+fn monitor(
+  port: Option(String),
+  baud: Option(Int),
+  timeout: Option(Int),
+  reset: Bool,
+) -> Nil {
+  let port = option.unwrap(port, "auto")
+  let baud = option.unwrap(baud, default_monitor_baud)
+  let timeout = option.unwrap(timeout, default_monitor_timeout)
+  case monitor_serial(port, baud, reset, timeout) {
+    Ok(Nil) ->
+      case timeout {
+        0 -> Nil
+        1 -> io.println("Stopped after 1 second.")
+        seconds ->
+          io.println("Stopped after " <> int.to_string(seconds) <> " seconds.")
+      }
+    Error("") -> exit(1)
+    Error(reason) -> {
+      io.println_error(reason)
+      exit(1)
+    }
+  }
 }
 
 fn build(output_file: Option(String)) -> Nil {
@@ -500,6 +534,14 @@ fn packbeam_create(
 
 @external(erlang, "orbital_ffi", "packbeam_list")
 fn packbeam_list(input_path input_path: String) -> Result(List(String), Nil)
+
+@external(erlang, "orbital_ffi", "monitor")
+fn monitor_serial(
+  port: String,
+  baud: Int,
+  reset: Bool,
+  timeout_seconds: Int,
+) -> Result(Nil, String)
 
 fn esp_flash_to_device(
   esptool: ExecutablePath,
