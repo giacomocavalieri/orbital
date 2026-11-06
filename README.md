@@ -35,6 +35,9 @@ run:
 gleam run -m orbital flash esp32 --port /dev/some_device
 ```
 
+`flash` reads the device partition table and writes the application at the
+`main.avm` address. Pass `--offset 0x2b8000` to choose an address yourself.
+
 And you're good to go! To get an overview of all the available commands and
 options you can run:
 
