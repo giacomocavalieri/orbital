@@ -13,6 +13,7 @@ import gleam/string
 import gleam_community/ansi
 import orbital/internal/cli
 import orbital/internal/executable.{type ExecutablePath}
+import orbital/internal/partition
 import orbital/internal/project.{
   type Project, CannotParseGleamToml, CannotReadGleamToml, CannotReadProjectName,
 }
@@ -64,12 +65,12 @@ pub fn main() -> Nil {
 
 fn flash(platform: cli.FlashPlatform) -> Nil {
   let flashed_device = case platform {
-    cli.Esp32(port:, baud:, dry_run: True) -> {
-      flash_esp32_dry_run(port, baud)
+    cli.Esp32(port:, baud:, offset:, dry_run: True) -> {
+      flash_esp32_dry_run(port, baud, offset)
       Ok(False)
     }
-    cli.Esp32(port:, baud:, dry_run: False) -> {
-      use _ <- result.try(do_flash_esp32(port, baud))
+    cli.Esp32(port:, baud:, offset:, dry_run: False) -> {
+      use _ <- result.try(do_flash_esp32(port, baud, offset))
       Ok(True)
     }
     cli.Pico(port:) -> {
@@ -88,17 +89,34 @@ fn flash(platform: cli.FlashPlatform) -> Nil {
   }
 }
 
-fn flash_esp32_dry_run(port: String, baud: Option(Int)) -> Nil {
+fn flash_esp32_dry_run(
+  port: String,
+  baud: Option(Int),
+  offset: Option(String),
+) -> Nil {
   let baud = option.unwrap(baud, default_baud) |> int.to_string
+  let address = option.unwrap(offset, "<MAIN_AVM_OFFSET>")
+  let read_partition = case offset {
+    Some(_) -> []
+    None -> [
+      "  esptool --chip auto \\",
+      "    --port '" <> port <> "' \\",
+      "    --baud " <> baud <> " \\",
+      "    read-flash 0x8000 0xC00 <PARTITION_TABLE>",
+      "",
+    ]
+  }
   let command =
-    [
+    list.append(read_partition, [
       "  esptool --chip auto \\",
       "    --port '" <> port <> "' \\",
       "    --baud " <> baud <> " \\",
       "    --before default-reset --after hard-reset write-flash -u \\",
-      "    --flash-mode keep --flash-freq keep --flash-size detect 0x210000 \\",
+      "    --flash-mode keep --flash-freq keep --flash-size detect "
+        <> address
+        <> " \\",
       "    <AVM_FILE>",
-    ]
+    ])
     |> string.join(with: "\n")
 
   io.println("To flash the device I would run this command:\n\n" <> command)
@@ -129,7 +147,11 @@ fn list(input_file: Option(String)) -> Nil {
   }
 }
 
-fn do_flash_esp32(port: String, baud: Option(Int)) -> Result(Nil, Error) {
+fn do_flash_esp32(
+  port: String,
+  baud: Option(Int),
+  offset: Option(String),
+) -> Result(Nil, Error) {
   // To flash to an esp device we need esptool to be installed and available in
   // the path!
   use esptool <- result.try(
@@ -141,12 +163,20 @@ fn do_flash_esp32(port: String, baud: Option(Int)) -> Result(Nil, Error) {
     use directory <- temporary.create(temporary.directory())
     let output_path = filepath.join(directory, "build.avm")
     use output_path <- result.try(do_build(Some(output_path)))
+    use offset <- result.try(resolve_offset(
+      esptool,
+      directory,
+      port,
+      baud,
+      offset,
+    ))
 
     // If the root project was compiled successufully we're good to go: we can
     // now pack all the produced `.beam` files into an `.avm` file ready to be
     // flushed into the device.
+    io.println(ansi.dim("Writing main.avm at " <> offset))
     use Nil <- try_step("Flashing the 'avm' file into the device...", fn() {
-      esp_flash_to_device(esptool, output_path, port, baud)
+      esp_flash_to_device(esptool, output_path, port, baud, offset)
     })
     Ok(Nil)
   }
@@ -273,6 +303,8 @@ type Error {
   CannotFlashWithEsptool(esptool_status_code: Int)
   CannotFlashPico(reason: simplifile.FileError)
   EsptoolCannotOpenPort(port: String)
+  CannotReadPartitionTable
+  CannotFindMainPartition
 }
 
 fn error_to_string(error: Error) -> String {
@@ -282,8 +314,11 @@ fn error_to_string(error: Error) -> String {
     EntrypointFunctionHasWrongArity(_) -> "wrong entrypoint function"
     CannotCompileProject -> "invalid Gleam project"
     CannotFindEsptoolExecutable -> "missing 'esptool'"
-    CannotFlashWithEsptool(_) | EsptoolCannotOpenPort(_) | CannotFlashPico(_) ->
-      "cannot flash device"
+    CannotFlashWithEsptool(_)
+    | EsptoolCannotOpenPort(_)
+    | CannotFlashPico(_)
+    | CannotReadPartitionTable
+    | CannotFindMainPartition -> "cannot flash device"
     OutputFileIsDirectory(_) -> "invalid output file"
     CannotReadAvmFile(_) -> "cannot read the 'avm' file"
 
@@ -343,6 +378,14 @@ fn error_to_string(error: Error) -> String {
       <> port
       <> "' is busy or doesn't exist.\n"
       <> "Hint: make sure the port is correct and the device connected."
+
+    CannotReadPartitionTable ->
+      "I couldn't read the partition table from the device.\n"
+      <> "Hint: hold BOOT, tap RESET, release BOOT, and try again."
+
+    CannotFindMainPartition ->
+      "The partition table has no main.avm slot.\n"
+      <> "Hint: pass --offset with the address printed in the boot log."
 
     OutputFileIsDirectory(file:) ->
       "'"
@@ -501,11 +544,55 @@ fn packbeam_create(
 @external(erlang, "orbital_ffi", "packbeam_list")
 fn packbeam_list(input_path input_path: String) -> Result(List(String), Nil)
 
+fn resolve_offset(
+  esptool: ExecutablePath,
+  directory: String,
+  port: String,
+  baud: Option(Int),
+  offset: Option(String),
+) -> Result(String, Error) {
+  case offset {
+    Some(offset) -> Ok(offset)
+    None -> read_main_avm_offset(esptool, directory, port, baud)
+  }
+}
+
+fn read_main_avm_offset(
+  esptool: ExecutablePath,
+  directory: String,
+  port: String,
+  baud: Option(Int),
+) -> Result(String, Error) {
+  let table_path = filepath.join(directory, "partition-table.bin")
+  let baud = option.unwrap(baud, default_baud) |> int.to_string
+  let outcome =
+    executable.run(esptool, ".", [
+      "--chip", "auto", "--port", port, "--baud", baud, "read-flash",
+      "--no-progress", "0x8000", "0xC00", table_path,
+    ])
+
+  case outcome {
+    Ok(0) ->
+      case simplifile.read_bits(table_path) {
+        Ok(table) ->
+          case partition.main_avm_offset(table) {
+            Ok(offset) -> Ok(partition.hex_address(offset))
+            Error(_) -> Error(CannotFindMainPartition)
+          }
+        Error(_) -> Error(CannotReadPartitionTable)
+      }
+    Ok(2) -> Error(EsptoolCannotOpenPort(port))
+    Ok(_) -> Error(CannotReadPartitionTable)
+    Error(_) -> Error(CannotSpawnEsptool)
+  }
+}
+
 fn esp_flash_to_device(
   esptool: ExecutablePath,
   output_path: String,
   port: String,
   baud: Option(Int),
+  offset: String,
 ) -> Result(Nil, Error) {
   let baud = option.unwrap(baud, default_baud) |> int.to_string
   let outcome =
@@ -513,7 +600,7 @@ fn esp_flash_to_device(
       "--chip", "auto", "--port", port, "--baud", baud, "--before",
       "default-reset", "--after", "hard-reset", "write-flash", "-u",
       "--flash-mode", "keep", "--flash-freq", "keep", "--flash-size", "detect",
-      "0x210000", output_path,
+      offset, output_path,
     ])
 
   case outcome {

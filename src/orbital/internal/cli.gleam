@@ -17,8 +17,10 @@ pub type Command {
   List(input_file: Option(String), help: Bool)
 }
 
+/// `offset` is the flash address of `main.avm`. `None` means read that address
+/// from the device's partition table.
 pub type FlashPlatform {
-  Esp32(port: String, baud: Option(Int), dry_run: Bool)
+  Esp32(port: String, baud: Option(Int), offset: Option(String), dry_run: Bool)
   Pico(port: String)
 }
 
@@ -86,7 +88,12 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
       case toggled(flags, "help"), rest {
         True, _ ->
           Ok(Flash(
-            platform: Esp32(port: "port", baud: None, dry_run: False),
+            platform: Esp32(
+              port: "port",
+              baud: None,
+              offset: None,
+              dry_run: False,
+            ),
             help: True,
           ))
 
@@ -107,8 +114,12 @@ pub fn parse(args: List(String)) -> Result(Command, Error) {
         False, ["esp32"] -> {
           use port <- require_flag(flags, ParsingFlash, "port")
           use baud <- optional_int_flag(flags, ParsingFlash, "baud")
+          use offset <- offset_flag(flags, ParsingFlash)
           let dry_run = toggled(flags, "dry-run")
-          Ok(Flash(platform: Esp32(port:, baud:, dry_run:), help: False))
+          Ok(Flash(
+            platform: Esp32(port:, baud:, offset:, dry_run:),
+            help: False,
+          ))
         }
 
         False, [platform] -> Error(InvalidFlashPlatform(platform))
@@ -224,6 +235,7 @@ fn esp_flash_flags() -> ValidatedFlagSpecs {
       hoist.new_flag("dry-run")
         |> hoist.with_short_alias("d")
         |> hoist.as_toggle,
+      hoist.new_flag("offset"),
       hoist.new_flag("help")
         |> hoist.with_short_alias("h")
         |> hoist.as_toggle,
@@ -284,6 +296,66 @@ fn optional_int_flag(
           ))
       }
   }
+}
+
+fn offset_flag(
+  flags: List(hoist.Flag),
+  state: ParsingState,
+  continue: fn(Option(String)) -> Result(a, Error),
+) -> Result(a, Error) {
+  case find_flag_value(flags, "offset") {
+    Error(_) -> continue(None)
+    Ok(value) ->
+      case is_hex_address(value) {
+        True -> continue(Some(value))
+        False ->
+          Error(InvalidFlagValue(
+            state:,
+            flag: "offset",
+            value:,
+            expected: "a hex address like 0x2b8000",
+          ))
+      }
+  }
+}
+
+fn is_hex_address(value: String) -> Bool {
+  case value {
+    "0x" <> digits | "0X" <> digits -> digits != "" && hex_digits(digits)
+    _ -> False
+  }
+}
+
+fn hex_digits(digits: String) -> Bool {
+  digits
+  |> string.to_graphemes
+  |> list.all(fn(digit) {
+    case digit {
+      "0"
+      | "1"
+      | "2"
+      | "3"
+      | "4"
+      | "5"
+      | "6"
+      | "7"
+      | "8"
+      | "9"
+      | "a"
+      | "b"
+      | "c"
+      | "d"
+      | "e"
+      | "f"
+      | "A"
+      | "B"
+      | "C"
+      | "D"
+      | "E"
+      | "F" -> True
+      _ -> False
+    }
+  })
 }
 
 fn toggled(flags: List(hoist.Flag), name: String) {
@@ -351,6 +423,11 @@ pub fn flash_help_text(description: Bool) -> Document {
     flag_line(
       "    -d, --dry-run            ",
       "only show the command used to flash the device",
+    ),
+    doc.line,
+    flag_line(
+      "    --offset       <HEX>    ",
+      "flash address. Read from the device's main.avm partition when omitted",
     ),
     doc.lines(2),
     command_line("  pico   ", ""),

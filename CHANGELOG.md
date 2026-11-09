@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- ESP32 flash reads the device partition table and writes the application at
+  the `main.avm` address. `--offset` selects a different address.
 - Orbital now has a `--version` flag to print its version.
 - Orbital now has a `list` command to list the contents of an avm file.
 
